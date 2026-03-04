@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Explore China</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #fff; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    header {
+      padding: 12px 20px;
+      background: linear-gradient(90deg, #c0392b, #922b21);
+      display: flex; align-items: center; gap: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4); z-index: 1000;
+    }
+    header span { font-size: 1.4rem; }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header p { font-size: 0.72rem; opacity: 0.8; margin-top: 1px; }
+
+    #map { flex: 1; z-index: 1; }
+
+    /* Floating city labels */
+    .city-label {
+      font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.55);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      pointer-events: auto; cursor: pointer;
+      transition: all 0.3s ease; white-space: nowrap;
+      letter-spacing: 0.5px;
+    }
+    .city-label:hover, .city-label.active {
+      color: #fff; font-size: 15px;
+      text-shadow: 0 0 12px rgba(231,76,60,0.6), 0 1px 4px rgba(0,0,0,0.8);
+    }
+    .city-label.dimmed { opacity: 0.25; font-size: 11px; }
+
+    /* Floating icons on default state */
+    .float-icon {
+      font-size: 22px; cursor: pointer;
+      transition: all 0.35s ease;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+      animation: gentle-float 3s ease-in-out infinite;
+    }
+    .float-icon.hidden { opacity: 0; transform: scale(0.3); pointer-events: none; }
+    .float-icon.dimmed { opacity: 0.15; pointer-events: none; }
+    @keyframes gentle-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+
+    /* Expanded landmark items (on city hover) */
+    .landmark-item {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(26,29,39,0.92); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px; padding: 5px 10px 5px 6px;
+      cursor: pointer; white-space: nowrap;
+      opacity: 0; transform: scale(0.5); pointer-events: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+    }
+    .landmark-item.visible { opacity: 1; transform: scale(1); pointer-events: auto; }
+    .landmark-item:hover { background: rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.4); }
+    .landmark-item .lm-thumb {
+      width: 32px; height: 32px; border-radius: 6px;
+      object-fit: cover; background: rgba(255,255,255,0.08);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .landmark-item .lm-name { font-size: 0.72rem; color: rgba(255,255,255,0.85); font-weight: 600; }
+
+    /* Detail card overlay */
+    .detail-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6); z-index: 2000;
+      display: none; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .detail-overlay.open { display: flex; }
+
+    .detail-card {
+      background: #1a1d27; border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 16px 64px rgba(0,0,0,0.7);
+      width: 380px; max-width: 92vw; max-height: 85vh;
+      overflow-y: auto; position: relative;
+    }
+
+    .detail-close {
+      position: absolute; top: 12px; right: 14px;
+      background: rgba(0,0,0,0.4); border: none;
+      color: #fff; font-size: 18px; width: 32px; height: 32px;
+      border-radius: 50%; cursor: pointer; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .detail-close:hover { background: rgba(255,255,255,0.2); }
+
+    .detail-hero {
+      width: 100%; height: 180px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 5rem;
+      border-radius: 20px 20px 0 0;
+    }
+
+    .detail-body { padding: 20px; }
+    .detail-body h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 3px; }
+    .detail-body .detail-city { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 14px; }
+
+    .detail-section { margin-bottom: 16px; }
+    .detail-section h3 {
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
+      color: rgba(255,255,255,0.4); margin-bottom: 8px;
+    }
+    .detail-section p {
+      font-size: 0.85rem; color: rgba(255,255,255,0.75); line-height: 1.6;
+    }
+
+    .detail-item {
+      display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
+    }
+    .detail-item .d-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .detail-item .d-text { font-size: 0.82rem; color: rgba(255,255,255,0.75); line-height: 1.5; }
+    .detail-item .d-label { font-weight: 600; color: #fff; }
+
+    .detail-links {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
+      padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .detail-link {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px; padding: 6px 14px;
+      font-size: 0.75rem; color: rgba(255,255,255,0.7);
+      text-decoration: none; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .detail-link:hover { background: rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.4); color: #fff; }
+
+    .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 14px; }
+    .tag {
+      background: rgba(231,76,60,0.12); border: 1px solid rgba(231,76,60,0.25);
+      color: #f1948a; font-size: 0.68rem; padding: 2px 8px;
+      border-radius: 16px; font-weight: 500;
+    }
+
+    /* Scrollbar */
+    .detail-card::-webkit-scrollbar { width: 6px; }
+    .detail-card::-webkit-scrollbar-track { background: transparent; }
+    .detail-card::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🇨🇳</span>
+  <div>
+    <h1>Explore China</h1>
+    <p>Hover a city, click to discover</p>
+  </div>
+</header>
+
+<div id="map"></div>
+<div class="detail-overlay" id="detailOverlay">
+  <div class="detail-card" id="detailCard">
+    <button class="detail-close" onclick="closeDetail()">&times;</button>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<script>
+// ===== DATA =====
+const cities = [
+  {
+    name: "Beijing", lat: 39.9042, lng: 116.4074,
+    landmarks: [
+      {
+        name: "Forbidden City", emoji: "🏯", lat: 39.9163, lng: 116.3972,
+        heroColor: "#8B0000",
+        tags: ["Imperial Palace", "UNESCO", "600 Years"],
+        sections: [
+          { title: "Why It Matters", type: "text", content: "The world's largest imperial palace complex. 9,999 rooms built for 24 emperors across two dynasties. No trees were planted inside — to prevent assassins from hiding." },
+          { title: "Key Sites", type: "items", items: [
+            { icon: "🚪", label: "Meridian Gate", text: "The grand south entrance — only the emperor used the center door" },
+            { icon: "🪑", label: "Hall of Supreme Harmony", text: "The throne room where emperors held coronations" },
+            { icon: "🌸", label: "Imperial Garden", text: "Peaceful rock gardens and ancient cypress trees at the north end" }
+          ]},
+          { title: "Practical Tips", type: "items", items: [
+            { icon: "🕐", label: "Timing", text: "Go early morning (8am) to beat crowds. Tuesday is least crowded" },
+            { icon: "🎫", label: "Tickets", text: "Book online in advance — sells out on holidays" }
+          ]}
+        ],
+        links: [{ label: "▶ YouTube Tour", url: "#" }, { label: "📖 Official Site", url: "#" }, { label: "💬 Reddit Tips", url: "#" }]
+      },
+      {
+        name: "Great Wall (Mutianyu)", emoji: "🧱", lat: 40.4319, lng: 116.5704,
+        heroColor: "#5D4037",
+        tags: ["UNESCO", "Hiking", "2000+ Years"],
+        sections: [
+          { title: "Why It Matters", type: "text", content: "Over 13,000 miles long, built across centuries to defend against northern invasions. Mutianyu is the best-restored section near Beijing — fewer crowds, more scenery, and a toboggan ride down." },
+          { title: "Which Section to Visit", type: "items", items: [
+            { icon: "🏔️", label: "Mutianyu", text: "Best for first-timers: restored, scenic, cable car + toboggan" },
+            { icon: "🥾", label: "Jinshanling", text: "For hikers: partially wild, stunning photography" },
+            { icon: "⚠️", label: "Badaling", text: "Most famous but extremely crowded — avoid on holidays" }
+          ]}
+        ],
+        links: [{ label: "▶ Drone Footage", url: "#" }, { label: "🗺️ Trail Map", url: "#" }]
+      },
+      {
+        name: "Peking Duck", emoji: "🦆", lat: 39.88, lng: 116.45,
+        heroColor: "#B71C1C",
+        tags: ["Must-Eat", "Crispy Skin", "Imperial Recipe"],
+        sections: [
+          { title: "What Makes It Special", type: "text", content: "Roasted in a wood-fired oven until the skin is paper-thin and crackling. Served with thin pancakes, spring onion, cucumber, and sweet bean sauce. The skill is in the carving — a good chef slices 120+ pieces from one duck." },
+          { title: "Where to Eat", type: "items", items: [
+            { icon: "⭐", label: "Da Dong", text: "Modern take — super crispy 'superslim' duck, upscale vibe" },
+            { icon: "🏛️", label: "Quanjude (est. 1864)", text: "The original chain — 160+ years of history" },
+            { icon: "🔥", label: "Siji Minfu", text: "Best value — long queues but worth it" }
+          ]}
+        ],
+        links: [{ label: "▶ How It's Made", url: "#" }, { label: "📍 Restaurant Map", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Chengdu", lat: 30.5728, lng: 104.0668,
+    landmarks: [
+      {
+        name: "Sichuan Hotpot", emoji: "🌶️", lat: 30.55, lng: 104.08,
+        heroColor: "#D32F2F",
+        tags: ["Spicy & Numbing", "Social Dining", "Must-Try"],
+        sections: [
+          { title: "The Experience", type: "text", content: "A boiling pot of fiery red oil loaded with chili and Sichuan peppercorns. You cook raw ingredients tableside — meat, vegetables, tofu. The peppercorn creates a unique 'mala' numbness. It's not just food, it's a social event that lasts hours." },
+          { title: "What to Order", type: "items", items: [
+            { icon: "🥩", label: "Beef slices", text: "Paper-thin, cooks in 10 seconds" },
+            { icon: "🧠", label: "Duck blood & brain", text: "Adventurous local favorites — surprisingly creamy" },
+            { icon: "🥬", label: "Lotus root & potato", text: "Absorb the spicy broth beautifully" }
+          ]},
+          { title: "Survival Tips", type: "items", items: [
+            { icon: "🥛", label: "Drink", text: "Order soy milk, not water — it tames the burn" },
+            { icon: "🔴", label: "Spice level", text: "Ask for yuan yang (half spicy, half mild) if you're not sure" }
+          ]}
+        ],
+        links: [{ label: "▶ Hotpot Guide", url: "#" }, { label: "💬 Reddit Reviews", url: "#" }]
+      },
+      {
+        name: "Giant Panda Base", emoji: "🐼", lat: 30.7309, lng: 104.139,
+        heroColor: "#2E7D32",
+        tags: ["Wildlife", "Conservation", "Morning Visit"],
+        sections: [
+          { title: "Why Go", type: "text", content: "The world's largest captive panda breeding center. Over 200 pandas live here. Baby pandas are the highlight — clumsy, playful, and impossibly cute. The base also breeds red pandas." },
+          { title: "Tips", type: "items", items: [
+            { icon: "🕗", label: "Go early", text: "Arrive at 8am — pandas are most active during morning feeding" },
+            { icon: "🚌", label: "Getting there", text: "30 min from city center by taxi or metro + shuttle" },
+            { icon: "📸", label: "Photo tip", text: "The moonlight nursery has baby pandas behind glass — best photo spot" }
+          ]}
+        ],
+        links: [{ label: "▶ Panda Cam", url: "#" }, { label: "📖 Official Site", url: "#" }]
+      },
+      {
+        name: "Tea House Culture", emoji: "🍵", lat: 30.60, lng: 103.98,
+        heroColor: "#33691E",
+        tags: ["Slow Life", "Mahjong", "People Watching"],
+        sections: [
+          { title: "What It's Like", type: "text", content: "Chengdu runs on tea. Locals spend entire afternoons in bamboo-chair tea houses playing mahjong, chatting, and getting their ears cleaned by roaming ear-cleaners. It's the city's version of cafe culture — slower, louder, and more social." },
+          { title: "Where to Go", type: "items", items: [
+            { icon: "🏛️", label: "People's Park", text: "The most famous — hundreds of locals under the trees daily" },
+            { icon: "🏮", label: "Heming Tea House", text: "Inside People's Park, open-air, iconic" }
+          ]}
+        ],
+        links: [{ label: "▶ Tea Culture", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Xi'an", lat: 34.2658, lng: 108.9541,
+    landmarks: [
+      {
+        name: "Terracotta Army", emoji: "⚔️", lat: 34.3841, lng: 109.2785,
+        heroColor: "#4E342E",
+        tags: ["Qin Dynasty", "UNESCO", "8000 Soldiers"],
+        sections: [
+          { title: "The Story", type: "text", content: "In 210 BC, Emperor Qin Shi Huang ordered an army of 8,000 life-size clay soldiers to guard him in the afterlife. Each face is unique. They were discovered by accident in 1974 by farmers digging a well. Most of the tomb complex remains unexcavated." },
+          { title: "The Pits", type: "items", items: [
+            { icon: "1️⃣", label: "Pit 1", text: "The main hall — 6,000 warriors in battle formation. Jaw-dropping scale." },
+            { icon: "2️⃣", label: "Pit 2", text: "Cavalry and archers, partially excavated" },
+            { icon: "🏺", label: "Bronze Chariots", text: "Intricate half-scale chariots with working parts — in the exhibition hall" }
+          ]}
+        ],
+        links: [{ label: "▶ Documentary", url: "#" }, { label: "📖 History Guide", url: "#" }]
+      },
+      {
+        name: "Biang Biang Noodles", emoji: "🍜", lat: 34.24, lng: 108.94,
+        heroColor: "#BF360C",
+        tags: ["Hand-Pulled", "Street Food", "Complex Character"],
+        sections: [
+          { title: "What Makes It Special", type: "text", content: "Extra-wide hand-pulled belt noodles, smacked on the counter. Topped with chili oil and garlic. The character for 'biang' has 58 strokes — one of the most complex Chinese characters, and it doesn't exist in any standard dictionary." },
+          { title: "Silk Road Street Food", type: "items", items: [
+            { icon: "🥙", label: "Roujiamo", text: "Spiced pork in crispy flatbread — China's answer to the burger" },
+            { icon: "🍲", label: "Yangrou Paomo", text: "Lamb soup where you crumble bread into the broth yourself" },
+            { icon: "🧁", label: "Persimmon Cakes", text: "Sweet fried pastries filled with walnut and date paste" }
+          ]}
+        ],
+        links: [{ label: "▶ Food Tour", url: "#" }, { label: "📍 Muslim Quarter Map", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Shanghai", lat: 31.2304, lng: 121.4737,
+    landmarks: [
+      {
+        name: "The Bund Skyline", emoji: "🌆", lat: 31.2400, lng: 121.4907,
+        heroColor: "#1A237E",
+        tags: ["Night View", "Modern vs Colonial", "Iconic"],
+        sections: [
+          { title: "The View", type: "text", content: "Stand on the colonial-era Bund and look across the river: the entire Pudong skyline — which was farmland in 1990 — now holds some of the world's tallest buildings. It's the single most dramatic visual of China's transformation." },
+          { title: "Day vs Night", type: "items", items: [
+            { icon: "☀️", label: "Daytime", text: "Walk the promenade, admire the 1920s European architecture" },
+            { icon: "🌙", label: "Night", text: "The Pudong skyline lights up — come after 7pm for the full show" },
+            { icon: "🚢", label: "River Cruise", text: "A cheap ferry (2 yuan) gives you the skyline from the water" }
+          ]}
+        ],
+        links: [{ label: "▶ Night Timelapse", url: "#" }, { label: "💬 Reddit Guide", url: "#" }]
+      },
+      {
+        name: "Xiaolongbao", emoji: "🥟", lat: 31.22, lng: 121.48,
+        heroColor: "#E65100",
+        tags: ["Soup Dumplings", "Must-Eat", "Careful — Hot!"],
+        sections: [
+          { title: "What It Is", type: "text", content: "Thin-skinned dumplings filled with pork and a burst of hot soup inside. You bite a small hole, sip the broth, then eat. Burning your mouth on the first one is a rite of passage." },
+          { title: "Where to Eat", type: "items", items: [
+            { icon: "⭐", label: "Din Tai Fung", text: "Consistent, international quality — good for first-timers" },
+            { icon: "🏆", label: "Jia Jia Tang Bao", text: "Tiny local shop, long queues, some say the best in Shanghai" },
+            { icon: "🦀", label: "Try crab version", text: "Seasonal (autumn) — hairy crab roe xiaolongbao is next-level" }
+          ]}
+        ],
+        links: [{ label: "▶ How to Eat XLB", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Guilin", lat: 25.2744, lng: 110.2900,
+    landmarks: [
+      {
+        name: "Li River Cruise", emoji: "⛰️", lat: 25.0637, lng: 110.3571,
+        heroColor: "#1B5E20",
+        tags: ["Karst Peaks", "On the 20 Yuan Bill", "Photography"],
+        sections: [
+          { title: "The Scenery", type: "text", content: "Karst limestone peaks rise like green fingers from the river. The landscape is so iconic it's printed on the 20-yuan banknote. These peaks formed over 300 million years ago from dissolving limestone. A cruise from Guilin to Yangshuo takes about 4 hours." },
+          { title: "Best Spots", type: "items", items: [
+            { icon: "📸", label: "20 Yuan View", text: "Near Xingping — bring a 20 yuan bill to compare" },
+            { icon: "🚣", label: "Bamboo Raft", text: "Quieter alternative to cruise boats for a section of the river" },
+            { icon: "🌅", label: "Xianggong Hill", text: "Sunrise viewpoint over the river bends — worth the early wake-up" }
+          ]}
+        ],
+        links: [{ label: "▶ Drone Footage", url: "#" }, { label: "🗺️ Cruise Options", url: "#" }]
+      },
+      {
+        name: "Guilin Rice Noodles", emoji: "🍜", lat: 25.29, lng: 110.31,
+        heroColor: "#827717",
+        tags: ["Breakfast Staple", "Light & Savory", "Cheap"],
+        sections: [
+          { title: "The Dish", type: "text", content: "Smooth rice noodles in clear broth with pickled beans, scallions, and marinated pork. Locals eat this for breakfast every single day. At 5-8 yuan a bowl, it might be the best meal-per-dollar in China." },
+        ],
+        links: [{ label: "▶ How It's Made", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Zhangjiajie", lat: 29.1170, lng: 110.4790,
+    landmarks: [
+      {
+        name: "Avatar Mountains", emoji: "🌉", lat: 29.3250, lng: 110.4340,
+        heroColor: "#263238",
+        tags: ["Avatar Film", "Glass Bridge", "Surreal"],
+        sections: [
+          { title: "The Experience", type: "text", content: "Thousands of narrow sandstone pillars rise hundreds of meters into the mist. James Cameron used them as inspiration for the floating mountains in Avatar. On a foggy day, the pillars literally appear to float. The glass-bottomed bridge (430m long, 300m high) is terrifying and unforgettable." },
+          { title: "Must-Do", type: "items", items: [
+            { icon: "🌫️", label: "Foggy day", text: "Don't be disappointed by fog — it makes the mountains look like they float" },
+            { icon: "🌉", label: "Glass Bridge", text: "Walk across 300m above the canyon floor. Wear shoe covers." },
+            { icon: "🚡", label: "Bailong Elevator", text: "World's tallest outdoor elevator — 326m up a cliff face" }
+          ]}
+        ],
+        links: [{ label: "▶ Avatar Mountains", url: "#" }, { label: "💬 Reddit Tips", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Lijiang", lat: 26.8721, lng: 100.2330,
+    landmarks: [
+      {
+        name: "Old Town", emoji: "🏮", lat: 26.8721, lng: 100.233,
+        heroColor: "#4A148C",
+        tags: ["Naxi Culture", "UNESCO", "800 Years Old"],
+        sections: [
+          { title: "The Place", type: "text", content: "An 800-year-old town of cobblestone streets, wooden buildings, and flowing canals. The Naxi people who built it have one of the world's last pictographic writing systems (Dongba). At night, red lanterns glow over the waterways." },
+          { title: "What to Experience", type: "items", items: [
+            { icon: "📝", label: "Dongba Script", text: "Visit workshops where artisans write in the ancient pictographic language" },
+            { icon: "🏔️", label: "Jade Dragon Mountain", text: "Snow-capped peak visible from town — cable car to 4,506m" },
+            { icon: "🎵", label: "Naxi Music", text: "Evening concerts of ancient orchestral music, performed by elders" }
+          ]}
+        ],
+        links: [{ label: "▶ Old Town Walk", url: "#" }, { label: "📖 Naxi Culture", url: "#" }]
+      },
+      {
+        name: "Wild Mushrooms", emoji: "🍄", lat: 26.85, lng: 100.20,
+        heroColor: "#3E2723",
+        tags: ["Yunnan Specialty", "Seasonal", "200+ Varieties"],
+        sections: [
+          { title: "Why It Matters", type: "text", content: "Yunnan produces over half of China's wild mushroom varieties — some found nowhere else. During rainy season (June-September), mushroom hot pot becomes the local obsession. Some varieties are mildly psychoactive and require proper cooking to be safe." },
+          { title: "Must-Try", type: "items", items: [
+            { icon: "🟤", label: "Matsutake", text: "Prized worldwide — grilled simply with butter" },
+            { icon: "🟠", label: "Jizong (Termite mushroom)", text: "Umami bomb — used in soups" },
+            { icon: "⚠️", label: "Safety", text: "Always eat at restaurants, never forage yourself. Locals know which ones need thorough cooking." }
+          ]}
+        ],
+        links: [{ label: "▶ Mushroom Season", url: "#" }]
+      }
+    ]
+  },
+  {
+    name: "Hangzhou", lat: 30.2741, lng: 120.1551,
+    landmarks: [
+      {
+        name: "West Lake", emoji: "🏞️", lat: 30.2422, lng: 120.153,
+        heroColor: "#004D40",
+        tags: ["UNESCO", "Poets' Lake", "Cherry Blossoms"],
+        sections: [
+          { title: "The Place", type: "text", content: "West Lake has inspired Chinese poets, painters, and lovers for over 1,000 years. Marco Polo called Hangzhou the most beautiful city in the world. In spring, cherry blossoms line the causeways. The lake and surrounding tea plantations are a UNESCO site." },
+          { title: "What to Do", type: "items", items: [
+            { icon: "🚣", label: "Boat ride", text: "Rent a hand-paddled boat at sunset for the classic experience" },
+            { icon: "🌸", label: "Su Causeway", text: "Walk or bike the 2.8km causeway — best in spring" },
+            { icon: "🍵", label: "Longjing Tea Village", text: "Visit the hillside plantations where China's most famous green tea grows" }
+          ]}
+        ],
+        links: [{ label: "▶ West Lake Seasons", url: "#" }, { label: "📖 History", url: "#" }]
+      },
+      {
+        name: "Dongpo Pork", emoji: "🐷", lat: 30.26, lng: 120.17,
+        heroColor: "#880E4F",
+        tags: ["Braised Pork Belly", "Song Dynasty Recipe", "Poet's Dish"],
+        sections: [
+          { title: "The Story", type: "text", content: "Named after Su Dongpo, a Song Dynasty poet who allegedly invented this dish while serving as governor of Hangzhou. Pork belly braised for hours until it melts in your mouth. The fat is the point — silky, sweet, and not greasy when done right." },
+        ],
+        links: [{ label: "▶ Recipe Story", url: "#" }]
+      }
+    ]
+  }
+];
+
+// ===== MAP SETUP =====
+const map = L.map('map', { center: [33, 106], zoom: 5, zoomControl: true });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO', maxZoom: 18
+}).addTo(map);
+
+let activeCity = null;
+const cityGroups = {};
+
+cities.forEach(city => {
+  const group = { label: null, floatIcons: [], landmarkItems: [] };
+
+  // City label
+  const labelIcon = L.divIcon({
+    className: '',
+    html: `<div class="city-label" data-city="${city.name}">${city.name}</div>`,
+    iconSize: [0, 0], iconAnchor: [0, 8]
+  });
+  group.label = L.marker([city.lat, city.lng], { icon: labelIcon, interactive: true }).addTo(map);
+
+  // Float icons (default visible)
+  city.landmarks.forEach((lm, i) => {
+    const angle = (i / city.landmarks.length) * Math.PI * 2 - Math.PI / 2;
+    const r = 0.15;
+    const fIcon = L.divIcon({
+      className: '',
+      html: `<div class="float-icon" data-city="${city.name}" style="animation-delay:${i * 0.4}s">${lm.emoji}</div>`,
+      iconSize: [28, 28], iconAnchor: [14, 14]
+    });
+    const fMarker = L.marker([lm.lat, lm.lng], { icon: fIcon, interactive: false }).addTo(map);
+    group.floatIcons.push(fMarker);
+  });
+
+  // Landmark items (visible on hover)
+  city.landmarks.forEach((lm, i) => {
+    const liIcon = L.divIcon({
+      className: '',
+      html: `<div class="landmark-item" data-city="${city.name}" data-lm="${i}">
+               <div class="lm-thumb">${lm.emoji}</div>
+               <div class="lm-name">${lm.name}</div>
+             </div>`,
+      iconSize: [0, 0], iconAnchor: [-20, 16]
+    });
+    const liMarker = L.marker([lm.lat, lm.lng], { icon: liIcon, interactive: true }).addTo(map);
+    group.landmarkItems.push(liMarker);
+  });
+
+  cityGroups[city.name] = group;
+});
+
+// ===== INTERACTION =====
+function activateCity(cityName) {
+  if (activeCity === cityName) return;
+  activeCity = cityName;
+
+  Object.entries(cityGroups).forEach(([name, g]) => {
+    const isActive = name === cityName;
+    const labelEl = g.label.getElement()?.querySelector('.city-label');
+    if (labelEl) {
+      labelEl.classList.toggle('active', isActive);
+      labelEl.classList.toggle('dimmed', !isActive);
+    }
+    g.floatIcons.forEach(m => {
+      const el = m.getElement()?.querySelector('.float-icon');
+      if (el) { el.classList.toggle('hidden', isActive); el.classList.toggle('dimmed', !isActive); }
+    });
+    g.landmarkItems.forEach(m => {
+      const el = m.getElement()?.querySelector('.landmark-item');
+      if (el) el.classList.toggle('visible', isActive);
+    });
+  });
+}
+
+function deactivateAll() {
+  activeCity = null;
+  Object.values(cityGroups).forEach(g => {
+    const labelEl = g.label.getElement()?.querySelector('.city-label');
+    if (labelEl) { labelEl.classList.remove('active', 'dimmed'); }
+    g.floatIcons.forEach(m => {
+      const el = m.getElement()?.querySelector('.float-icon');
+      if (el) { el.classList.remove('hidden', 'dimmed'); }
+    });
+    g.landmarkItems.forEach(m => {
+      const el = m.getElement()?.querySelector('.landmark-item');
+      if (el) el.classList.remove('visible');
+    });
+  });
+}
+
+// Hover/click events via delegation
+document.addEventListener('mouseover', e => {
+  const cityEl = e.target.closest('[data-city]');
+  if (cityEl) activateCity(cityEl.dataset.city);
+});
+
+document.addEventListener('click', e => {
+  const lmEl = e.target.closest('.landmark-item');
+  if (lmEl) {
+    const cityName = lmEl.dataset.city;
+    const lmIdx = parseInt(lmEl.dataset.lm);
+    const city = cities.find(c => c.name === cityName);
+    if (city) openDetail(city.landmarks[lmIdx]);
+    return;
+  }
+  // Click on map background deactivates
+  if (e.target.closest('#map') && !e.target.closest('[data-city]') && !e.target.closest('.leaflet-control')) {
+    deactivateAll();
+  }
+});
+
+// ===== DETAIL CARD =====
+function openDetail(lm) {
+  const overlay = document.getElementById('detailOverlay');
+  const content = document.getElementById('detailContent');
+
+  let html = `<div class="detail-hero" style="background:${lm.heroColor}">${lm.emoji}</div>`;
+  html += `<div class="detail-body">`;
+  html += `<h2>${lm.name}</h2>`;
+  html += `<div class="tag-row">${lm.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>`;
+
+  lm.sections.forEach(s => {
+    html += `<div class="detail-section"><h3>${s.title}</h3>`;
+    if (s.type === 'text') {
+      html += `<p>${s.content}</p>`;
+    } else if (s.type === 'items') {
+      s.items.forEach(item => {
+        html += `<div class="detail-item"><div class="d-icon">${item.icon}</div><div class="d-text"><span class="d-label">${item.label}:</span> ${item.text}</div></div>`;
+      });
+    }
+    html += `</div>`;
+  });
+
+  if (lm.links) {
+    html += `<div class="detail-links">`;
+    lm.links.forEach(link => {
+      html += `<a class="detail-link" href="${link.url}" target="_blank">${link.label}</a>`;
+    });
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  content.innerHTML = html;
+  overlay.classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+}
+document.getElementById('detailOverlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeDetail();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+</script>
+</body>
+</html>
